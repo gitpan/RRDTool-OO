@@ -1,4 +1,5 @@
 Changes
+eg/graph.pl
 lib/RRDTool/OO.pm
 Makefile.PL
 MANIFEST
@@ -11,3 +12,4 @@ t/003Discover.t
 t/004Template.t
 t/005Graph.t
 t/006Tune.t
+t/007Dump.t
