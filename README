@@ -1,0 +1,355 @@
+######################################################################
+    RRDTool::OO 0.02
+######################################################################
+
+NAME
+    RRDTool::OO - Object-oriented interface to RRDTool
+
+SYNOPSIS
+            # Constructor     
+        my $rrd = RRDTool::OO->new(
+                     file => "myrrdfile.rdd" );
+
+            # Create a round-robin database
+        $rrd->create(
+             step        => 1,  # one-second intervals
+             data_source => { name      => "mydatasource",
+                              type      => "GAUGE" },
+             archive     => { rows      => 5 });
+
+            # Update RRD with sample values, use current time.
+        for(1..3) {
+            $rrd->update($_);
+            sleep(1);
+        }
+
+            # Start fetching values from one day back, 
+            # but skip undefined ones first
+        $rrd->fetch_start();
+        $rrd->fetch_skip_undef();
+
+            # Fetch stored values
+        while(my($time, $value) = $rrd->fetch_next()) {
+             print "$time: ", 
+                   defined $value ? $value : "[undef]", "\n";
+        }
+
+            # Draw a graph in a PNG image
+        $rrd->graph(
+          file           => "mygraph.png",
+          vertical_label => 'My Salary',
+          start          => time() - 10,
+        );
+
+DESCRIPTION
+    Note: This module is under development.
+
+    "RRDTool::OO" is an object-oriented interface to Tobi Oetiker's round
+    robin database tool *rrdtool*. It uses *rrdtool*'s "RRDs" module to get
+    access to *rrdtool*'s shared library.
+
+    "RRDTool::OO" tries to marry *rrdtool*'s database engine with the
+    dwimminess and whipuptitude Perl programmers take for granted. Using
+    "RRDTool::OO" abstracts away implementation details of the RRD engine,
+    uses easy to memorize named parameters and sets meaningful defaults for
+    parameters not needed in simple cases. For the experienced user,
+    however, it provides full access to *rrdtool*'s API. (Please check
+    "Development Status" to verify how much of it has been implemented yet,
+    though, since this module is under development :).
+
+  FUNCTIONS
+    *my $rrd = RRDTool::OO->new( file => $file )*
+        The constructor hooks up with an existing RRD database file $file,
+        but doesn't create a new one if none exists. That's what the
+        "create()" methode is for. Returns a "RRDTool::OO" object, which can
+        be used to get access to the following methods.
+
+    *$rrd->create( ... )*
+        Creates a new round robin database (RRD). A RRD consists of one or
+        more data sources and one or more archives:
+
+            $rrd->create(
+                 step        => 60,
+                 data_source => { name      => "mydatasource",
+                                  type      => "GAUGE" },
+                 archive     => { rows      => 5 });
+
+        This defines a RRD database with a step rate of 60 seconds in
+        between primary data points.
+
+        It also sets up one data source named "my_data_source" of type
+        "GAUGE", telling *rrdtool* to use values of data samples as-is,
+        without additional trickery.
+
+        And it creates a single archive with a 1:1 mapping between primary
+        data points and archive points, with a capacity to hold five data
+        points.
+
+        The RRD's "step" parameter is optional, and will be set to 300
+        seconds by *rrdtool* by default.
+
+        In addition to the mandatory settings for "name" and "type",
+        "data_source" parameter takes the following optional parameters:
+        "min" (minimum input, defaults to "U"), "max" (maximum input,
+        defaults to "U"), "heartbeat" (defaults to twice the RRD's step
+        rate).
+
+        Archives expect at least one parameter, "rows" indicating the number
+        of data points the archive is configured to hold. If nothing else is
+        set, *rrdtool* will store primary data points 1:1 in the archive.
+
+        If you want to combine several primary data points into one archive
+        point, specify values for "cpoints" (the number of points to
+        combine) and "cfunc" (the consolidation function) explicitely:
+
+            $rrd->create(
+                 step        => 60,
+                 data_source => { name      => "mydatasource",
+                                  type      => "GAUGE" },
+                 archive     => { rows      => 5,
+                                  cpoints   => 10,
+                                  cfunc     => 'AVERAGE',
+                                });
+
+        This will collect 10 data points to form one archive point, using
+        the calculated average, as indicated by the parameter "cfunc"
+        (Consolidation Function, CF). Other options for "cfunc" are "MIN",
+        "MAX", and "LAST".
+
+    *$rrd->update( ... ) *
+        Update the round robin database with a new data sample, consisting
+        of a value and an optional time stamp. If called with a single
+        parameter, like in
+
+            $rrd->update($value);
+
+        then the current timestamp and the defined $value will be used. If
+        "update" is called with a named parameter list like in
+
+            $rrd->update(time => $time, value => $value);
+
+        then the given timestamp $time is used along with the given value
+        $value.
+
+        When updating multiple data sources, use the "values" parameter
+        (instead of "value") and pass an arrayref:
+
+            $rrd->update(time => $time, values => [$val1, $val2, ...]);
+
+        This way, *rrdtool* expects you to pass in the data values in
+        exactly the same order as the data sources were defined in the
+        "create" method. If that's not the case, then the "values" parameter
+        also accepts a hashref, mapping data source names to values:
+
+            $rrd->update(time => $time, 
+                         values => { $dsname1 => $val1, 
+                                     $dsname2 => $val2, ...});
+
+        "RRDTool::OO" will transform this automagically into "RRDTool's"
+        *template* syntax.
+
+    *$rrd->fetch_start( ... )*
+        Initializes the iterator to fetch data from the RRD. This works
+        nicely without any parameters if your archives are using a single
+        consolidation function (e.g. "MAX"). If there's several archives in
+        the RRD using different consolidation functions, you have to specify
+        which one you want:
+
+            $rrd->fetch_start(cfunc => "MAX");
+
+        Other options for "cfunc" are "MIN", "AVERAGE", and "LAST".
+
+        "fetch_start" features a number of optional parameters: "start",
+        "end" and "resolution".
+
+        If the "start" time parameter is omitted, the fetch starts 24 hours
+        before the end of the archive. Also, an "end" time can be specified:
+
+            $rrd->fetch_start(start => time()-10*60,
+                              end   => time());
+
+        The third optional parameter, "resolution" defaults to the highest
+        resolution available and can be set to a value in seconds,
+        specifying the time interval between the data samples extracted from
+        the RRD. See the "rrdtool fetch" manual page for details.
+
+        Development note: The current implementation fetches *all* values
+        from the RRA in one swoop and caches them in memory. This might
+        change in the future, to cache only the last timestamp and keep
+        fetching from the RRD with every "fetch_next()" call.
+
+    *$rrd->fetch_skip_undef()*
+        *rrdtool* doesn't remember the time the first data sample went into
+        the archive. So if you run a *rrdtool fetch* with a start time of 24
+        hours ago and you've only submitted a couple of samples to the
+        archive, you'll see many "undef" values.
+
+        Starting from the current iterator position (or at the specified
+        "start" time immediately after a "fetch_start()"),
+        "fetch_skip_undef()" will skip all "undef" values in the RRA and
+        positions the iterator right before the first defined value. If all
+        values in the RRA are undefined, the a following
+        "$rrd->fetch_next()" will return "undef".
+
+    *($time, $value, ...) = $rrd->fetch_next()*
+        Gets the next row from the RRD iterator, initialized by a previous
+        call to "$rrd->fetch_start()". Returns the time of the archive point
+        along with all values as a list.
+
+    *$rrd->graph( ... )*
+        If there's only one data source in the RRD, drawing nice graph in an
+        image file on disk is as easy as
+
+            $rrd->graph(
+              file           => $image_file_name,
+              vertical_label => 'My Salary',
+              draw           => { thickness => 2,
+                                  color     => 'FF0000'},
+            );
+
+        This will assume a start time of 24 hours before now and an end time
+        of now. Specify "start" and "end" explicitely to be clear:
+
+            $rrd->graph(
+              file           => $image_file_name,
+              vertical_label => 'My Salary',
+              color          => 'FF0000', # (red)
+              start          => time() - 24*3600,
+              end            => time(),
+              draw           => { thickness => 2,
+                                  color     => 'FF0000'},
+            );
+
+        If there are multiple datasources in the RRD or multiple archives
+        with different values for "cfunc", just specify explicitely which
+        one to draw:
+
+            $rrd->graph(
+              file           => $image_file_name,
+              vertical_label => 'My Salary',
+              draw           => {
+                thickness => 2,
+                color     => 'FF0000',
+                dsname    => "load",
+                cfunc     => 'MAX'},
+            );
+
+        And you can certainly have more than one graph in the picture:
+
+            $rrd->graph(
+              file           => $image_file_name,
+              vertical_label => 'My Salary',
+              draw           => {
+                thickness => 2,
+                color     => 'FF0000', # red
+                dsname    => "load",
+                cfunc     => 'MAX'},
+              draw        => {
+                thickness => 2,
+                color     => '00FF00', # green
+                dsname    => "load",
+                cfunc     => 'AVERAGE'},
+            );
+
+        NOTE: "graph()" is still under development, the interface displayed
+        above might change.
+
+    *$rrd->error_message()*
+        Return the message of the last error that occurred while interacting
+        with "RRDTool::OO".
+
+  Development Status
+    The following methods are not yet implemented:
+
+    "graph" (partially), "dump", "restore", "tune", "last", "info",
+    "rrdresize", "xport", "rrdcgi".
+
+  Error Handling
+    By default, "RRDTool::OO"'s methods will throw fatal errors (as in:
+    they're calling "die") if the underlying "RRDs::*" commands indicate
+    failure.
+
+    This behaviour can be overridden by calling the constructor with the
+    "raise_error" flag set to false:
+
+        my $rrd = RRDTool::OO->new(
+            file        => "myrrdfile.rdd",
+            raise_error => 0,
+        );
+
+    In this mode, RRDTool's methods will just pass back values returned from
+    the underlying "RRDs" functions if an error happens (usually 1 if
+    successful and "undef" if an error occurs).
+
+  Debugging
+    "RRDTool::OO" is "Log::Log4perl" enabled, so if you want to know what's
+    going on under the hood, just turn it on:
+
+        use Log::Log4perl qw(:easy);
+
+        Log::Log4perl->easy_init({
+            level    => $DEBUG
+        }); 
+
+    If you're interested particularily in *rrdtool* commands issued by
+    "RRDTool::OO" while you're operating it, just enable the category
+    "rrdtool":
+
+        Log::Log4perl->easy_init({
+            level    => $INFO, 
+            category => 'rrdtool',
+            layout   => '%m%n',
+        }); 
+
+    This will display all "rrdtool" commands that "RRDTool::OO" submits to
+    the shared library. Let's turn it on for the code snippet in the
+    SYNOPSIS section of this manual page and watch the output:
+
+        rrdtool create myrrdfile.rdd --step 1 \
+                DS:mydatasource:GAUGE:2:U:U RRA:MAX:0.5:1:5
+        rrdtool update myrrdfile.rdd N:1
+        rrdtool update myrrdfile.rdd N:2
+        rrdtool update myrrdfile.rdd N:3
+        rrdtool fetch myrrdfile.rdd MAX
+
+    Often handy for cut-and-paste.
+
+INSTALLATION
+    "RRDTool::OO" requires a *rrdtool* installation with the "RRDs" Perl
+    module, that comes with the "rrdtool" distribution.
+
+    Download the tarball from
+
+        http://people.ee.ethz.ch/~oetiker/webtools/rrdtool/pub/rrdtool.tar.gz
+
+    and then unpack, compile and install:
+
+        tar zxfv rrdtool.tar.gz
+        cd rrdtool-1.0.46
+        make
+        cd perl-shared
+        perl Makefile.PL
+        ./configure
+        make
+        make test
+        make install
+
+SEE ALSO
+    Tobi Oetiker's RRDTool homepage at
+
+        http://rrdtool.org
+
+    especially the manual page at
+
+        http://people.ee.ethz.ch/~oetiker/webtools/rrdtool/manual/index.html
+
+AUTHOR
+    Mike Schilli, <m@perlmeister.com>
+
+COPYRIGHT AND LICENSE
+    Copyright (C) 2004 by Mike Schilli
+
+    This library is free software; you can redistribute it and/or modify it
+    under the same terms as Perl itself, either Perl version 5.8.3 or, at
+    your option, any later version of Perl 5 you may have available.
+
