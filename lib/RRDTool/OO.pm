@@ -7,7 +7,7 @@ use Carp;
 use RRDs;
 use Log::Log4perl qw(:easy);
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
    # Define the mandatory and optional parameters for every method.
 our $OPTIONS = {
@@ -37,6 +37,7 @@ our $OPTIONS = {
                                      overlay unit lazy upper_limit lower_limit
                                      logarithmic color no_legend only_graph
                                      force_rules_legend title step draw
+                                     print gprint
                                     )],
                     draw      => {
                       mandatory => [qw()],
@@ -47,6 +48,14 @@ our $OPTIONS = {
                       mandatory => [qw()],
                       optional  => [qw(back canvas shadea shadeb
                                        grid mgrid font frame arrow)],
+                    },
+                    print      => {
+                      mandatory => [qw()],
+                      optional  => [qw(draw format cfunc)],
+                    },
+                    gprint     => {
+                      mandatory => [qw()],
+                      optional  => [qw(draw format cfunc)],
                     },
                   },
     fetch_start=> { mandatory => [qw()],
@@ -434,9 +443,12 @@ sub graph {
 
     my @trailing_options = ();
 
+    my $vname_default;
+
     check_options "graph", \@options;
 
     my @colors = ();
+    my @prints = ();
 
     my @draws = ();
     my %options_hash = @options;
@@ -454,10 +466,18 @@ sub graph {
                 push @colors, "--color", 
                               uc($_) . "$options[$i+1]->{$_}";
             }
+        } elsif($options[$i] eq "print") {
+            check_options "graph/print", [%{$options[$i+1]}];
+                push @prints, [$options[$i], $options[$i+1]];
+        } elsif($options[$i] eq "gprint") {
+            check_options "graph/gprint", [%{$options[$i+1]}];
+                push @prints, [$options[$i], $options[$i+1]];
         }
     }
 
     delete $options_hash{color};
+    delete $options_hash{print};
+    delete $options_hash{gprint};
 
     @options = add_dashes(\%options_hash);
 
@@ -502,6 +522,9 @@ sub graph {
             $_->{name} = "draw$draw_count";
         }
 
+            # Set default var name
+        $vname_default ||= $_->{name};
+
             # Is it just a CDEF, a different view of a another draw?
         if($_->{cdef}) {
             push @options, "CDEF:$_->{name}=$_->{cdef}";
@@ -525,7 +548,9 @@ sub graph {
         my $draw_attributes = ":$_->{name}#$_->{color}";
         $draw_attributes .= ":$_->{legend}" if length $_->{legend};
 
-        if($_->{type} eq "line") {
+        if($_->{type} eq "hidden") {
+            # Invisible graph
+        } elsif($_->{type} eq "line") {
             push @options, "LINE$_->{thickness}$draw_attributes";
         } elsif($_->{type} eq "area") {
             push @options, "AREA$draw_attributes";
@@ -538,6 +563,17 @@ sub graph {
         $draw_count++;
     }
 
+        # Push all prints and gprints
+    for(@prints) {
+        $_->[1]->{draw}   ||= $draws[0]->{name};
+        $_->[1]->{cfunc}  ||= "AVERAGE";
+        $_->[1]->{format} ||= "Average=%lf";
+        push @options, uc($_->[0]) . ":" .
+                       $_->[1]->{draw} . ":" .
+                       $_->[1]->{cfunc} . ":" .
+                       $_->[1]->{format};
+    }
+    
     push @options, @colors;
     unshift @options, $image;
 
@@ -1008,7 +1044,7 @@ along with all values as a list.
 
 =item I<$rrd-E<gt>graph( ... )>
 
-If there's only one data source in the RRD, drawing nice graph in
+If there's only one data source in the RRD, drawing a nice graph in
 an image file on disk is as easy as
 
     $rrd->graph(
@@ -1037,7 +1073,7 @@ be clear:
 
 As always, C<RRDTool::OO> will pick reasonable defaults for parameters
 not specified. The values for data source and consolidation function
-are default to the first values it finds in the RRD.
+default to the first values it finds in the RRD.
 If there are multiple datasources in the RRD or multiple archives
 with different values for C<cfunc>, just specify explicitely which
 one to draw:
@@ -1052,7 +1088,9 @@ one to draw:
         cfunc     => 'MAX'},
     );
 
-If C<draw> doesn't define a C<type>, it defaults to C<"line">. Other
+If C<draw> doesn't define a C<type>, it defaults to C<"line">. If
+you don't want to define a type (because the graph shouldn't drawn), 
+use C<type =E<gt> "hidden">. Other
 values are C<"area"> for solid colored areas and C<"stack"> for 
 graphical values stacked on top of each other.
 And you can certainly have more than one graph in the picture:
@@ -1073,7 +1111,7 @@ And you can certainly have more than one graph in the picture:
     );
 
 Graphs may assemble data from different RRD files. Just specify
-which file you want to draw the data from per C<draw>:
+which file you want to draw the data from, using C<draw>:
 
     $rrd->graph(
       image          => $image_file_name,
@@ -1190,6 +1228,32 @@ on what each option is used for:
 
     http://people.ee.ethz.ch/~oetiker/webtools/rrdtool/manual/rrdgraph.html
 
+Sometimes it's useful to print max, min or average values of
+a given graph at the bottom of the chart or to STDOUT. That's what
+C<gprint> and C<print> options are for. In addition to the C<draw>
+name (defaults to the first draw), a consolidation function can
+be specified: MIN, MAX, AVERAGE, LAST (defaults to AVERAGE). Note
+that this is unrelated to the data source's consolidation function,
+it's just applied on the graph print/gprint refer to. Finally, the
+C<format> parameter gives a printf-like template (defaults to 
+"Average=%lf": A call to
+
+    $rrd->graph(
+      image          => $image_file_name,
+      draw           => {
+        name      => "first_draw",
+        dsname    => "load",
+        cfunc     => 'MAX'},
+      gprint         => {
+        draw      => 'first_draw',
+        cfunc     => 'AVERAGE',
+        format    => 'Average=%lf',
+      },
+    );
+
+prints "Average=x.xx" at the bottom of the graph, showing what the
+average value of the graph is.
+
 =item I<$rrd-E<gt>dump()>
 
 I<Available as of rrdtool 1.0.49>.
@@ -1220,7 +1284,7 @@ map of parameter names and their values.
 
 Return the RRD's last update time.
 
-=item I<$rrd-E<gt>restore(xml => "file.xml")>
+=item I<$rrd-E<gt>restore(xml =E<gt> "file.xml")>
 
 I<Available as of rrdtool 1.0.49>.
 
@@ -1261,7 +1325,6 @@ with C<RRDTool::OO>.
 
 The following methods are not yet implemented:
 
-C<dump>, C<restore> (just because they're not offered via RRDs),
 C<rrdresize>, C<xport>, C<rrdcgi>.
 
 =head2 Error Handling
