@@ -1,5 +1,5 @@
 ######################################################################
-    RRDTool::OO 0.05
+    RRDTool::OO 0.06
 ######################################################################
 
 NAME
@@ -77,7 +77,8 @@ DESCRIPTION
                  archive     => { rows      => 5 });
 
         This defines a RRD database with a step rate of 60 seconds in
-        between primary data points.
+        between primary data points. Additionally, the RRD start time can be
+        specified by specifying a "start" parameter.
 
         It also sets up one data source named "my_data_source" of type
         "GAUGE", telling *rrdtool* to use values of data samples as-is,
@@ -297,8 +298,22 @@ DESCRIPTION
 
         in order to be passed properly to RRDTool.
 
+        The "color" option expects a reference to a hash with various
+        settings for the different graph areas: "back" (background),
+        "canvas", "shadea" (left/top border), "shadeb" (right/bottom
+        border), "grid", "mgrid" major grid, "font", "frame" and "arrow":
+
+            $rrd->graph(
+              ...
+              color          => { back   => '#0e0e0e',
+                                  arrow  => '#ff0000',
+                                  canvas => '#eebbbb',
+                                },
+              ...
+            );
+
         Please check the RRDTool documentation for a detailed description on
-        what each of them is used for:
+        what each option is used for:
 
             http://people.ee.ethz.ch/~oetiker/webtools/rrdtool/manual/rrdgraph.html
 
