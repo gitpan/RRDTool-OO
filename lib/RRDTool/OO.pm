@@ -7,7 +7,7 @@ use Carp;
 use RRDs;
 use Log::Log4perl qw(:easy);
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 
    # Define the mandatory and optional parameters for every method.
 our $OPTIONS = {
@@ -688,11 +688,48 @@ sub meta_data_discover {
 }
 
 #################################################
+sub info_aux {
+#################################################
+    my($self) = @_;
+
+    return $self->RRDs_execute("info", $self->{file});
+}
+
+#################################################
 sub info {
 #################################################
     my($self) = @_;
 
-    my $hashref = $self->RRDs_execute("info", $self->{file});
+    my $hashref = $self->info_aux();
+
+        # Returns something like
+          # {'rra[0].rows' => 5,
+          # 'rra[1].pdp_per_row' => 5,
+          # 'last_update' => 1080462600,
+          # 'rra[0].cf' => 'MAX',
+          # 'step' => 60,
+          # 'rra[1].cdp_prep[0].value' => undef,
+          # 'rra[0].cdp_prep[0].unknown_datapoints' => 0,
+          # ...
+          # }
+        # Parse it into a Perl array/hash hierarchy:
+
+    my $h = {};
+
+    for my $key (keys %$hashref) {
+
+        my $ptr = \$h;
+
+        while($key =~ /\G(?:\.?(\w+)|\[(\d+)\]|\[(.*?)\])/g) {
+            $ptr = $1         ? \$$ptr->{$1} : 
+                   defined $2 ? \$$ptr->[$2] : 
+                                \$$ptr->{$3};
+        }
+
+        $$ptr = $hashref->{$key};
+    }
+
+    return $h;
 }
 
 #################################################
@@ -712,6 +749,8 @@ __END__
 RRDTool::OO - Object-oriented interface to RRDTool
 
 =head1 SYNOPSIS
+
+    use RRDTool::OO;
 
         # Constructor     
     my $rrd = RRDTool::OO->new(
@@ -837,6 +876,28 @@ This will collect 10 data points to form one archive point, using
 the calculated average, as indicated by the parameter C<cfunc>
 (Consolidation Function, CF). Other options for C<cfunc> are 
 C<MIN>, C<MAX>, and C<LAST>.
+
+If you're defining multiple data sources or multiple archives, just
+provide them in this manner:
+
+       # Define the RRD
+    my $rc = $rrd->create(
+        step        => 60,
+        data_source => { name      => 'load1',
+                         type      => 'GAUGE',
+                       },
+        data_source => { name      => 'load2',
+                         type      => 'GAUGE',
+                       },
+        archive     => { rows      => 5,
+                         cpoints   => 10,
+                         cfunc     => 'AVERAGE',
+                        },
+        archive     => { rows      => 5,
+                         cpoints   => 10,
+                         cfunc     => 'MAX',
+                        },
+    );
 
 =item I<$rrd-E<gt>update( ... ) >
 
