@@ -7,7 +7,7 @@ use Carp;
 use RRDs;
 use Log::Log4perl qw(:easy);
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
    # Define the mandatory and optional parameters for every method.
 our $OPTIONS = {
@@ -25,8 +25,8 @@ our $OPTIONS = {
                       optional  => [qw(cfunc cpoints xff)],
                     },
                   },
-    update     => { mandatory => [qw(value)],
-                    optional  => [qw(time)],
+    update     => { mandatory => [qw()],
+                    optional  => [qw(time value values)],
                   },
     graph      => { mandatory => [qw(file)],
                     optional  => [qw(vertical_label start end)],
@@ -263,7 +263,7 @@ sub update {
     my @update_options = ();
 
     if(exists $options_hash{values}) {
-        if(ref($options_hash{values} eq "HASH")) {
+        if(ref($options_hash{values}) eq "HASH") {
                 # Do the template magic
             push @update_options, "--template", 
                  join(":", keys %{$options_hash{values}});
@@ -510,14 +510,16 @@ sub meta_data_discover {
 
     foreach my $key (keys %$hashref){
 
-        if($key =~ /^rra\[\d+\]\.cf = "(.*?)"/) {
-            $self->meta_data("cfuncs", $1, 1);
+        if($key =~ /^rra\[\d+\]\.cf/) {
+            DEBUG "rrdinfo: rra found: $key";
+            $self->meta_data("cfuncs", $hashref->{$key}, 1);
             next;
-        }
-        
-        if($key =~ /^ds\[(.*?)]\./) {
+        } elsif ($key =~ /^ds\[(.*?)]\./) {
+            DEBUG "rrdinfo: da found: $key";
             $self->meta_data("dsnames", $1, 1);
             next;
+        } else {
+            DEBUG "rrdinfo: no match: $key";
         }
     }
 
