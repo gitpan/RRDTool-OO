@@ -7,7 +7,7 @@ use Carp;
 use RRDs;
 use Log::Log4perl qw(:easy);
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
    # Define the mandatory and optional parameters for every method.
 our $OPTIONS = {
@@ -28,11 +28,20 @@ our $OPTIONS = {
     update     => { mandatory => [qw()],
                     optional  => [qw(time value values)],
                   },
-    graph      => { mandatory => [qw(file)],
-                    optional  => [qw(vertical_label start end)],
+    graph      => { mandatory => [qw(image)],
+                    optional  => [qw(vertical_label title start end x_grid
+                                     y_grid alt_y_grid no_minor alt_y_mrtg
+                                     alt_autoscale alt_autoscale_max 
+                                     units_exponent units_length width
+                                     height interlaced imginfo imgformat
+                                     overlay unit lazy upper_limit
+                                     logarithmic color no_legend only_graph
+                                     force_rules_legend title step draw
+                                    )],
                     draw      => {
                       mandatory => [qw()],
-                      optional  => [qw(dsname cfunc thickness color)],
+                      optional  => [qw(file dsname cfunc thickness 
+                                       type color)],
                     },
                   },
     fetch_start=> { mandatory => [qw()],
@@ -44,11 +53,12 @@ our $OPTIONS = {
     dump       => { mandatory => [],
                     optional  => [],
                   },
-    restore    => { mandatory => [],
-                    optional  => [],
+    restore    => { mandatory => [qw(xml)],
+                    optional  => [qw(range_check)],
                   },
     tune       => { mandatory => [],
-                    optional  => [],
+                    optional  => [qw(heartbeat minimum maximum 
+                                     type name)],
                   },
     last       => { mandatory => [],
                     optional  => [],
@@ -68,11 +78,19 @@ our $OPTIONS = {
 };
 
 my %RRDs_functions = (
-    create => \&RRDs::create,
-    fetch  => \&RRDs::fetch,
-    update => \&RRDs::update,
-    graph  => \&RRDs::graph,
-    info   => \&RRDs::info,
+    create    => \&RRDs::create,
+    fetch     => \&RRDs::fetch,
+    update    => \&RRDs::update,
+    graph     => \&RRDs::graph,
+    info      => \&RRDs::info,
+    dump      => \&RRDs::dump,
+    restore   => \&RRDs::restore,
+    tune      => \&RRDs::tune,
+    last      => \&RRDs::last,
+    info      => \&RRDs::info,
+    rrdresize => \&RRDs::rrdresize,
+    xport     => \&RRDs::xport,
+    rrdcgi    => \&RRDs::rrdcgi,
 );
 
 #################################################
@@ -135,6 +153,15 @@ sub new {
     };
 
     bless $self, $class;
+}
+
+#################################################
+sub first_def {
+#################################################
+    foreach(@_) {
+        return $_ if defined $_;
+    }
+    return undef;
 }
 
 #################################################
@@ -404,31 +431,31 @@ sub graph {
     my %options_hash = @options;
     my $draw_count   = 1;
 
-    my $file = delete $options_hash{file};
+    my $image = delete $options_hash{image};
     delete $options_hash{draw};
 
     for(my $i=0; $i < @options; $i += 2) {
-        push @draws, $options[$i+1] if $options[$i] eq "draw";
+        if($options[$i] eq "draw") {
+            push @draws, $options[$i+1];
+        }
     }
 
     @options = add_dashes(\%options_hash);
 
     # Set dsname default
     if(!exists $options_hash{dsname}) {
-        my $dsnames = $self->meta_data("dsnames");
-        LOGDIE "No default archive dsname" unless 
-            defined $dsnames->[0];
-        $options_hash{dsname} = $dsnames->[0];
-        DEBUG "Getting default dsname '$options_hash{dsname}'";
+        my $dsname = $self->default("dsname");
+        LOGDIE "No default archive dsname" unless defined $dsname;
+        $options_hash{dsname} = $dsname;
+        DEBUG "Getting default dsname '$dsname'";
     }
 
     # Set cfunc default
     if(!exists $options_hash{cfunc}) {
-        my $cfuncs = $self->meta_data("cfuncs");
-        LOGDIE "No default archive cfunc" unless 
-            defined $cfuncs->[0];
-        $options_hash{cfunc} = $cfuncs->[0];
-        DEBUG "Getting default cfunc '$options_hash{cfunc}'";
+        my $cfunc = $self->default("cfunc");
+        LOGDIE "No default archive cfunc" unless defined $cfunc;
+        $options_hash{cfunc} = $cfunc;
+        DEBUG "Getting default cfunc '$cfunc'";
     }
 
         # Push a pseudo draw if there's none.
@@ -440,19 +467,124 @@ sub graph {
         $_->{thickness} ||= 1;        # LINE1 is default
         $_->{color}     ||= 'FF0000'; # red is default
 
+        $_->{file}   = first_def $_->{file}, $self->{file};
+
+        my($dsname, $cfunc);
+
+        if($_->{file} ne $self->{file}) {
+            my $rrd = __PACKAGE__->new(file => $_->{file});
+            $dsname = $rrd->default('dsname');
+            $cfunc  = $rrd->default('cfunc');
+        }
+
+            # Use either directly defined, default for a given file or
+            # default for default file, in this order.
+        $_->{dsname} = first_def $_->{dsname}, $dsname, $options_hash{dsname};
+        $_->{cfunc}  = first_def $_->{cfunc}, $cfunc, $options_hash{cfunc};
+
         # Create the draw strings
-            #DEF:myload=$DB:load:MAX
-        push @options, "DEF:draw$draw_count=$self->{file}:" .
-                       "$options_hash{dsname}:" .
-                       "$options_hash{cfunc}";
+        #DEF:myload=$DB:load:MAX
+        push @options, "DEF:draw$draw_count=$_->{file}:" .
+                       "$_->{dsname}:" .
+                       "$_->{cfunc}";
             #LINE2:myload#FF0000
-        push @options, "LINE$_->{thickness}:draw$draw_count#$_->{color}";
+        $_->{type} ||= 'line';
+
+        if($_->{type} eq "line") {
+            push @options, "LINE$_->{thickness}:draw$draw_count#$_->{color}";
+        } elsif($_->{type} eq "area") {
+            push @options, "AREA:draw$draw_count#$_->{color}";
+        } elsif($_->{type} eq "stack") {
+            push @options, "STACK:draw$draw_count#$_->{color}";
+        } else {
+            die "Invalid graph type: $_->{type}";
+        }
+        
         $draw_count++;
     }
 
-    unshift @options, $file;
+    unshift @options, $image;
 
     $self->RRDs_execute("graph", @options);
+}
+
+#################################################
+sub dump {
+#################################################
+    my($self, @options) = @_;
+
+    $self->RRDs_execute("dump", $self->{file}, @options);
+}
+
+#################################################
+sub restore {
+#################################################
+    my($self, @options) = @_;
+
+    my %options_hash = @options;
+    delete $options_hash{xml};
+
+    @options = add_dashes(\%options_hash);
+
+    $self->RRDs_execute("restore", $options_hash{xml}, $self->{file}, 
+                        @options);
+}
+
+#################################################
+sub tune {
+#################################################
+    my($self, @options) = @_;
+
+    my %options_hash = @options;
+
+    my $dsname = first_def $options_hash{dsname}, $self->default("dsname");
+    delete $options_hash{dsname};
+
+    @options = ();
+
+    my %map = qw( type data-source-type
+                  name data-source-rename
+                );
+
+    for my $param (qw(heartbeat minimum maximum type name)) {
+        if(exists $options_hash{$param}) {
+            my $newparam = $param;
+    
+            $newparam = $map{$param} if exists $map{$param};
+    
+            push @options, "--$newparam", 
+                 "$dsname:$options_hash{$param}";
+        }
+    }
+
+    my $rc = $self->RRDs_execute("tune", $self->{file}, @options);
+
+    # This might impact the default dsname, rediscover
+    $self->meta_data_discover();
+
+    return $rc;
+}
+
+#################################################
+sub default {
+#################################################
+    my($self, $param) = @_;
+
+    if($param eq "cfunc") {
+        my $cfuncs = $self->meta_data("cfuncs");
+        return undef unless $cfuncs;
+            # Return the first of all defined consolidation functions
+        return $cfuncs->[0];
+    }
+
+    if($param eq "dsname") {
+        my $dsnames = $self->meta_data("dsnames");
+        return undef unless $dsnames;
+            # Return the first of all defined data sources
+        return $dsnames->[0];
+    }
+
+    return undef;
 }
 
 #################################################
@@ -506,6 +638,9 @@ sub meta_data_discover {
     #rra[0].cdp_prep[0].value = NaN
     #rra[0].cdp_prep[0].unknown_datapoints = 0
 
+        # Nuke everything
+    delete $self->{meta};
+
     my $hashref = $self->RRDs_execute("info", $self->{file});
 
     foreach my $key (keys %$hashref){
@@ -527,6 +662,22 @@ sub meta_data_discover {
                     "dsnames=(@{$self->{meta}->{dsnames}})";
 
     $self->{meta}->{discovered} = 1;
+}
+
+#################################################
+sub info {
+#################################################
+    my($self) = @_;
+
+    my $hashref = $self->RRDs_execute("info", $self->{file});
+}
+
+#################################################
+sub last {
+#################################################
+    my($self) = @_;
+
+    $self->RRDs_execute("last", $self->{file});
 }
 
 1;
@@ -569,14 +720,19 @@ RRDTool::OO - Object-oriented interface to RRDTool
 
         # Draw a graph in a PNG image
     $rrd->graph(
-      file           => "mygraph.png",
+      image          => "mygraph.png",
       vertical_label => 'My Salary',
       start          => time() - 10,
+      draw           => {
+          type  => "area",
+          color => '0000FF',
+      }
     );
 
 =head1 DESCRIPTION
 
-B<Note: This module is under development.>
+=for html
+<IMG SRC=/images/rrdtool/mygraph.png>
 
 C<RRDTool::OO> is an object-oriented interface to Tobi Oetiker's 
 round robin database tool I<rrdtool>. It uses I<rrdtool>'s 
@@ -752,7 +908,7 @@ If there's only one data source in the RRD, drawing nice graph in
 an image file on disk is as easy as
 
     $rrd->graph(
-      file           => $image_file_name,
+      image          => $image_file_name,
       vertical_label => 'My Salary',
       draw           => { thickness => 2,
                           color     => 'FF0000'},
@@ -763,21 +919,23 @@ end time of now. Specify C<start> and C<end> explicitely to
 be clear:
 
     $rrd->graph(
-      file           => $image_file_name,
+      image          => $image_file_name,
       vertical_label => 'My Salary',
-      color          => 'FF0000', # (red)
       start          => time() - 24*3600,
       end            => time(),
       draw           => { thickness => 2,
                           color     => 'FF0000'},
     );
 
+As always, C<RRDTool::OO> will pick reasonable defaults for parameters
+not specified. The values for data source and consolidation function
+are default to the first values it finds in the RRD.
 If there are multiple datasources in the RRD or multiple archives
 with different values for C<cfunc>, just specify explicitely which
 one to draw:
 
     $rrd->graph(
-      file           => $image_file_name,
+      image          => $image_file_name,
       vertical_label => 'My Salary',
       draw           => {
         thickness => 2,
@@ -786,25 +944,129 @@ one to draw:
         cfunc     => 'MAX'},
     );
 
+If C<draw> doesn't define a C<type>, it defaults to C<"line">. Other
+values are C<"area"> for solid colored areas and C<"stack"> for 
+graphical values stacked on top of each other.
 And you can certainly have more than one graph in the picture:
 
     $rrd->graph(
-      file           => $image_file_name,
+      image          => $image_file_name,
       vertical_label => 'My Salary',
       draw           => {
-        thickness => 2,
-        color     => 'FF0000', # red
+        type      => 'area',
+        color     => 'FF0000', # red area
         dsname    => "load",
         cfunc     => 'MAX'},
       draw        => {
-        thickness => 2,
-        color     => '00FF00', # green
+        type      => 'stack',
+        color     => '00FF00', # a green area stacked on top of the red one 
         dsname    => "load",
         cfunc     => 'AVERAGE'},
     );
 
-NOTE: C<graph()> is still under development, the interface displayed 
-above might change.
+Graphs may assemble data from different RRD files. Just specify
+which file you want to draw the data from per C<draw>:
+
+    $rrd->graph(
+      image          => $image_file_name,
+      vertical_label => 'Network Traffic',
+      draw           => {
+        file      => "file1.rrd",
+      },
+      draw        => {
+        file      => "file2.rrd",
+        type      => 'stack',
+        color     => '00FF00', # a green area stacked on top of the red one 
+        dsname    => "load",
+        cfunc     => 'AVERAGE'},
+    );
+
+If a C<file> parameter is specified per C<draw>, the defaults for C<dsname>
+and C<cfunc> are fetched from this file, not from the file that's attached
+to the C<RRDTool::OO> object C<$rrd> used.
+
+On a global level, in addition to the C<vertical_label> parameter shown
+in the examples above, C<graph> offers a plethora of parameters:
+
+C<vertical_label>, 
+C<title>, 
+C<start>, 
+C<end>, 
+C<x_grid>, 
+C<y_grid>, 
+C<alt_y_grid>, 
+C<no_minor>, 
+C<alt_y_mrtg>, 
+C<alt_autoscale>, 
+C<alt_autoscale_max>, 
+C<units_exponent>, 
+C<units_length>, 
+C<width>, 
+C<height>, 
+C<interlaced>, 
+C<imginfo>, 
+C<imgformat>, 
+C<overlay>, 
+C<unit>, 
+C<lazy>, 
+C<upper_limit>, 
+C<logarithmic>, 
+C<color>, 
+C<no_legend>, 
+C<only_graph>, 
+C<force_rules_legend>, 
+C<title>, 
+C<step>.
+
+Please check the RRDTool documentation for a detailed description
+on what each of them is used for:
+
+    http://people.ee.ethz.ch/~oetiker/webtools/rrdtool/manual/rrdgraph.html
+
+=item I<$rrd-E<gt>dump()>
+
+I<Not implemented, because it's not available via C<RRDs>. Once it is,
+it will be available via C<RRDTool> automatically.>
+
+=item I<my $hashref = $rrd-E<gt>info()>
+
+Grabs the RRD's meta data and returns it as a hashref, holding a
+map of parameter names and their values.
+
+=item I<my $time = $rrd-E<gt>last()>
+
+Return the RRD's last update time.
+
+=item I<$rrd-E<gt>restore(xml => "file.xml")>
+
+I<Not implemented, because it's not available via C<RRDs>. Once it is,
+it will be available via C<RRDTool> automatically.>
+
+Restore a RRD from a C<dump>. The C<xml> parameter specifies the name
+of the XML file containing the dump. If the optional flag C<range_check>
+is set to a true value, C<restore> will make sure the values in the 
+RRAs do not exceed the limits defined for the different datasources:
+
+    $rrd->restore(xml => "file.xml", range_check => 1);
+
+=item I<$rrd-E<gt>tune( ... )>
+
+Alter a RRD's data source configuration values:
+
+        # Set the heartbeat of the RRD's only datasource to 100
+    $rrd->tune(heartbeat => 100);
+
+        # Set the minimum of DS 'load' to 1
+    $rrd->tune(dsname => 'load', minimum => 1);
+
+        # Set the maximum of DS 'load' to 10
+    $rrd->tune(dsname => 'load', maximum => 10);
+
+        # Set the type of DS 'load' to AVERAGE
+    $rrd->tune(dsname => 'load', type => 'AVERAGE');
+
+        # Set the name of DS 'load' to 'load2'
+    $rrd->tune(dsname => 'load', name => 'load2');
 
 =item I<$rrd-E<gt>error_message()>
 
@@ -817,15 +1079,8 @@ with C<RRDTool::OO>.
 
 The following methods are not yet implemented:
 
-C<graph> (partially),
-C<dump>,
-C<restore>,
-C<tune>,
-C<last>,
-C<info>,
-C<rrdresize>,
-C<xport>,
-C<rrdcgi>.
+C<dump>, C<restore> (just because they're not offered via RRDs),
+C<rrdresize>, C<xport>, C<rrdcgi>.
 
 =head2 Error Handling
 
@@ -903,13 +1158,26 @@ and then unpack, compile and install:
 
 =head1 SEE ALSO
 
+=over 4
+
+=item *
+
 Tobi Oetiker's RRDTool homepage at 
 
     http://rrdtool.org
 
 especially the manual page at 
 
-    http://people.ee.ethz.ch/~oetiker/webtools/rrdtool/manual/index.html
+        http://people.ee.ethz.ch/~oetiker/webtools/rrdtool/manual/index.html
+
+=item *
+
+My articles on rrdtool in "Linux Magazin" (Germany) and "Linux Magazine" (UK):
+
+    http://www.linux-magazin.de/Artikel/ausgabe/2004/06/perl/perl.html
+    http://www.linux-magazine.com/issue/44/Limiting_Data.pdf (not online yet)
+
+=back
 
 =head1 AUTHOR
 

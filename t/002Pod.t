@@ -6,8 +6,8 @@ use warnings;
 
 my $count = 0;
 
-#    use Log::Log4perl qw(:easy);
-#
+    use Log::Log4perl qw(:easy);
+
 #    Log::Log4perl->easy_init({
 #        level    => $INFO, 
 #        category => 'rrdtool',
@@ -30,7 +30,7 @@ my $count = 0;
     ok(1, "Create");
 
         # Update RRD with sample values, use current time.
-    for(1..5) {
+    for(1..3) {
         $rrd->update($_);
         ok(1, "Update");
         sleep(1);
@@ -50,15 +50,44 @@ my $count = 0;
 
         # Draw a graph in a PNG image
     $rrd->graph(
-      file           => "mygraph.png",
+      image          => "mygraph.png",
       vertical_label => 'My Salary',
       start          => time() - 10,
+      draw           => {
+          type  => "area",
+          color => '0000FF',
+      }
+    );
+### END POD HERE ###
+
+        # Area graph
+    $rrd->graph(
+      image          => "mygraph.png",
+      vertical_label => 'My Salary',
+      start          => time() - 10,
+      draw           => {
+          type      => "area",
+          color     => '0000ff',
+      },
     );
 
-### END POD HERE ###
+        # Stacked graph
+    $rrd->graph(
+      image          => "mygraph.png",
+      vertical_label => 'My Salary',
+      start          => time() - 10,
+      draw           => {
+          type      => "area",
+          color     => '0000ff',
+      },
+      draw           => {
+          type      => "stack",
+          color     => '00ff00',
+      },
+    );
 
 ok($count > 2, "Fetch");
 
-END { unlink "mygraph.png";
+END { #unlink "mygraph.png";
       unlink "myrrdfile.rrd";
     }
