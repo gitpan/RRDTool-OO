@@ -7,7 +7,7 @@ use Carp;
 use RRDs;
 use Log::Log4perl qw(:easy);
 
-our $VERSION = '0.09';
+our $VERSION = '0.10';
 
    # Define the mandatory and optional parameters for every method.
 our $OPTIONS = {
@@ -41,7 +41,7 @@ our $OPTIONS = {
                     draw      => {
                       mandatory => [qw()],
                       optional  => [qw(file dsname cfunc thickness 
-                                       type color)],
+                                       type color legend name cdef)],
                     },
                     color     => {
                       mandatory => [qw()],
@@ -432,6 +432,8 @@ sub graph {
 #################################################
     my($self, @options) = @_;
 
+    my @trailing_options = ();
+
     check_options "graph", \@options;
 
     my @colors = ();
@@ -479,10 +481,12 @@ sub graph {
     @draws = ({}) unless @draws;
 
     for(@draws) {
+
         check_options "graph/draw", [%$_];
 
         $_->{thickness} ||= 1;        # LINE1 is default
         $_->{color}     ||= 'FF0000'; # red is default
+        $_->{legend}    ||= '';       # no legend by default
 
         $_->{file}   = first_def $_->{file}, $self->{file};
 
@@ -494,25 +498,39 @@ sub graph {
             $cfunc  = $rrd->default('cfunc');
         }
 
-            # Use either directly defined, default for a given file or
-            # default for default file, in this order.
-        $_->{dsname} = first_def $_->{dsname}, $dsname, $options_hash{dsname};
-        $_->{cfunc}  = first_def $_->{cfunc}, $cfunc, $options_hash{cfunc};
+        unless(defined $_->{name}) {
+            $_->{name} = "draw$draw_count";
+        }
 
-        # Create the draw strings
-        #DEF:myload=$DB:load:MAX
-        push @options, "DEF:draw$draw_count=$_->{file}:" .
-                       "$_->{dsname}:" .
-                       "$_->{cfunc}";
+            # Is it just a CDEF, a different view of a another draw?
+        if($_->{cdef}) {
+            push @options, "CDEF:$_->{name}=$_->{cdef}";
+        } else {
+                # Use either directly defined, default for a given file or
+                # default for default file, in this order.
+            $_->{dsname} = first_def $_->{dsname}, $dsname, 
+                                     $options_hash{dsname};
+            $_->{cfunc}  = first_def $_->{cfunc}, $cfunc, $options_hash{cfunc};
+
+            # Create the draw strings
+            #DEF:myload=$DB:load:MAX
+            push @options, "DEF:$_->{name}=$_->{file}:" .
+                           "$_->{dsname}:" .
+                           "$_->{cfunc}";
+        }
+
             #LINE2:myload#FF0000
         $_->{type} ||= 'line';
 
+        my $draw_attributes = ":$_->{name}#$_->{color}";
+        $draw_attributes .= ":$_->{legend}" if length $_->{legend};
+
         if($_->{type} eq "line") {
-            push @options, "LINE$_->{thickness}:draw$draw_count#$_->{color}";
+            push @options, "LINE$_->{thickness}$draw_attributes";
         } elsif($_->{type} eq "area") {
-            push @options, "AREA:draw$draw_count#$_->{color}";
+            push @options, "AREA$draw_attributes";
         } elsif($_->{type} eq "stack") {
-            push @options, "STACK:draw$draw_count#$_->{color}";
+            push @options, "STACK$draw_attributes";
         } else {
             die "Invalid graph type: $_->{type}";
         }
@@ -786,8 +804,9 @@ RRDTool::OO - Object-oriented interface to RRDTool
       vertical_label => 'My Salary',
       start          => time() - 10,
       draw           => {
-          type  => "area",
-          color => '0000FF',
+          type   => "area",
+          color  => '0000FF',
+          legend => "Salary over Time",
       }
     );
 
@@ -996,7 +1015,9 @@ an image file on disk is as easy as
       image          => $image_file_name,
       vertical_label => 'My Salary',
       draw           => { thickness => 2,
-                          color     => 'FF0000'},
+                          color     => 'FF0000',
+                          legend    => 'Salary over Time',
+                        },
     );
 
 This will assume a start time of 24 hours before now and an
@@ -1009,7 +1030,9 @@ be clear:
       start          => time() - 24*3600,
       end            => time(),
       draw           => { thickness => 2,
-                          color     => 'FF0000'},
+                          color     => 'FF0000',
+                          legend    => 'Salary over Time',
+                        },
     );
 
 As always, C<RRDTool::OO> will pick reasonable defaults for parameters
@@ -1057,18 +1080,51 @@ which file you want to draw the data from per C<draw>:
       vertical_label => 'Network Traffic',
       draw           => {
         file      => "file1.rrd",
+        legend    => "First Source",
       },
       draw        => {
         file      => "file2.rrd",
         type      => 'stack',
         color     => '00FF00', # a green area stacked on top of the red one 
         dsname    => "load",
-        cfunc     => 'AVERAGE'},
+        legend    => "Second Source",
+        cfunc     => 'AVERAGE'
+      },
     );
 
 If a C<file> parameter is specified per C<draw>, the defaults for C<dsname>
 and C<cfunc> are fetched from this file, not from the file that's attached
 to the C<RRDTool::OO> object C<$rrd> used.
+
+Graphs may also consist of algebraic calculations of previously defined 
+graphs. In this case, graphs derived from real data sources need to be named,
+so that subsequent C<cdef> definitions can refer to them and calculate
+new graphs, based on the previously defined graph:
+
+    $rrd->graph(
+      image          => $image_file_name,
+      vertical_label => 'Network Traffic',
+      draw           => {
+        type      => 'line',
+        color     => 'FF0000', # red line
+        dsname    => 'load',
+        name      => 'firstgraph',
+        legend    => 'Unmodified Load',
+      },
+      draw        => {
+        type      => 'line',
+        color     => '00FF00', # green line
+        cdef      => "firstgraph,2,*",
+        legend    => 'Load Doubled Up',
+      },
+    );
+
+Note that the second C<draw> doesn't refer to a datasource C<dsname>
+(nor does it fall back to the default data source), but 
+defines a C<cdef>, performing calculations on a previously defined 
+draw named C<firstgraph>. The calculation is specified using 
+RRDTool's reverse polish notation, where instructions are separated by commas
+(C<"firstgraph,2,*"> simply multiplies C<firstgraph>'s values by 2).
 
 On a global level, in addition to the C<vertical_label> parameter shown
 in the examples above, C<graph> offers a plethora of parameters:
