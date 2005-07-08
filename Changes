@@ -1,4 +1,9 @@
 
+0.12 (07/07/2005)
+    (ms) Steve van der Burg added vrule, comment, and font options
+    (ms) Makefile.PL dependencies version number changed from undef to 0
+    (ms) Added 'rigid' option to graph.
+
 0.11 (01/05/2005)
     (ms) Added suggestion by Richard Lippmann <lippmann@sprachtheorie.de>
          to allow for invisible graphs, just used as base for later 
@@ -64,7 +69,4 @@
 
 TODO:
 
-* Why doesn't RRDs offer dump()/restore() methods?
-* some less frequently used graph parameters like CDEF, PRINT, x-grid
-  aren't integrated yet or could be integrated more OO-like.
 * fetch_start/next iterator with saved timestamp, without caching all values

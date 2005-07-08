@@ -1,5 +1,5 @@
 ######################################################################
-    RRDTool::OO 0.11
+    RRDTool::OO 0.12
 ######################################################################
 
 NAME
@@ -352,7 +352,7 @@ DESCRIPTION
         "alt_y_grid", "no_minor", "alt_y_mrtg", "alt_autoscale",
         "alt_autoscale_max", "units_exponent", "units_length", "width",
         "height", "interlaced", "imginfo", "imgformat", "overlay", "unit",
-        "lazy", "upper_limit", "logarithmic", "color", "no_legend",
+        "lazy", "rigid", "upper_limit", "logarithmic", "color", "no_legend",
         "only_graph", "force_rules_legend", "title", "step".
 
         Some options (e.g. "alt_y_grid") don't expect values, they need to
@@ -375,6 +375,18 @@ DESCRIPTION
                                 },
               ...
             );
+
+        Fonts for various graph elements may be specified in "font" blocks,
+        which must either name a TrueType font file or a PDF/Postscript font
+        name. You may optionally specify a size and element name (defaults
+        to DEFAULT, which to RRD means "use this font for everything).
+        Example:
+
+            font  => {
+                name => "/usr/openwin/lib/X11/fonts/TrueType/GillSans.ttf",
+                size => 16,
+                element => "title"
+            }
 
         Please check the RRDTool documentation for a detailed description on
         what each option is used for:
@@ -406,6 +418,46 @@ DESCRIPTION
 
         prints "Average=x.xx" at the bottom of the graph, showing what the
         average value of the graph is.
+
+        To write comments to the graph (like gprints, but with no associated
+        RRD data source) use "comment", like this:
+
+            $rrd->graph(
+              image          => $image_file_name,
+              draw           => {
+                name      => "first_draw",
+                dsname    => "load",
+                cfunc     => 'MAX'},
+              comment        => "Remember, 83% of all statistics are made up",
+              gprint         => {
+                draw      => 'first_draw',
+                cfunc     => 'AVERAGE',
+                format    => 'Average=%lf',
+              },
+            );
+
+        Multiple comment lines can be specified in a single comment
+        specification like this:
+
+             comment => [ "All the king's horses and all the king's men\\n",
+                          "couldn't put Humpty together again.\\n",
+                        ],
+
+        Vertical rules (lines) may be placed into the graph by using a
+        "vrule" block like so:
+
+               vrule => { time => time()-3600, }
+
+        These can be useful for indicating when the most recent day on the
+        graph started, for example.
+
+        vrules can have a color specification (they default to black) and
+        also an optional legend string specified:
+
+              vrule => { time => $first_thing_today,
+                         color => "#0000ff",
+                         legend => "When we crossed midnight"
+                       },
 
     *$rrd->dump()*
         *Available as of rrdtool 1.0.49*.
