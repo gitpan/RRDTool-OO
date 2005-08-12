@@ -1,5 +1,5 @@
 
-use Test::More qw(no_plan);
+use Test::More tests => 15;
 use RRDTool::OO;
 use Log::Log4perl qw(:easy);
 
@@ -324,7 +324,14 @@ unlink "mygraph.png";
         name      => 'firstgraph',
         legend    => 'Unmodified Load',
       },
+      draw           => {
+        type      => 'hidden',
+        name      => 'average_of_first_draw',
+        vdef      => 'firstgraph,AVERAGE',
+      },
       gprint         => {
+        draw   => 'average_of_first_draw', 
+        format => "Hello %lf",
       },
     );
 
@@ -332,7 +339,6 @@ view("mygraph.png");
 ok(-f "mygraph.png", "Image exists");
 unlink "mygraph.png";
 
-VRULE:
 ######################################################################
 # Test comment, vrule
 ######################################################################
@@ -367,6 +373,82 @@ VRULE:
 #                size    => 32,
 #                element => "title",
 #              },
+    );
+
+view("mygraph.png");
+ok(-f "mygraph.png", "Image exists");
+unlink "mygraph.png";
+
+######################################################################
+# Test line, area
+######################################################################
+    $rrd->graph(
+      image          => "mygraph.png",
+      vertical_label => 'My Salary',
+      width          => 1000,
+      start          => $start_time,
+      end            => $start_time + $nof_iterations * 60,
+      draw           => {
+        type      => 'line',
+        color     => 'FF0000', # red line
+        name      => 'firstgraph',
+        legend    => 'Unmodified Load',
+      },
+      line        => {
+                value  => 3,
+                legend => "line1",
+                color  => "#00ff00",
+                stack  => 1,
+      },
+      line        => {
+                value  => 10,
+                legend => "line2",
+                color  => "#ff0000",
+      },
+      area        => {
+                value  => 5,
+                legend => "area1",
+                color  => "#0000ff",
+      },
+      tick        => {
+                legend => "ticks",
+                color  => "#00ff00",
+                fraction => 0.5,
+      },
+      shift       => {
+                draw  => 'firstgraph',
+                offset => 1000,
+      },
+    );
+
+view("mygraph.png");
+ok(-f "mygraph.png", "Image exists");
+unlink "mygraph.png";
+
+VDEF:
+######################################################################
+# Test vdef, gprint
+######################################################################
+    $rrd->graph(
+      image          => "mygraph.png",
+      vertical_label => 'My Salary',
+      width          => 1000,
+      start          => $start_time,
+      end            => $start_time + $nof_iterations * 60,
+      draw           => {
+        type      => 'line',
+        name      => 'firstdraw',
+        legend    => 'Unmodified Load',
+      },
+      draw           => {
+        type      => 'hidden',
+        name      => 'average_of_firstgraph',
+        vdef      => 'firstdraw,AVERAGE',
+      },
+      gprint         => {
+        draw      => 'average_of_firstgraph',
+        format    => 'Average=%lf',
+      },
     );
 
 view("mygraph.png");

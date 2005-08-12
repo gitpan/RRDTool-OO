@@ -7,7 +7,7 @@ use Carp;
 use RRDs;
 use Log::Log4perl qw(:easy);
 
-our $VERSION = '0.12';
+our $VERSION = '0.13';
 
    # Define the mandatory and optional parameters for every method.
 our $OPTIONS = {
@@ -38,12 +38,13 @@ our $OPTIONS = {
                                      rigid
                                      logarithmic color no_legend only_graph
                                      force_rules_legend title step draw
+                                     line area shift tick
                                      print gprint vrule comment font
                                     )],
                     draw      => {
                       mandatory => [qw()],
                       optional  => [qw(file dsname cfunc thickness 
-                                       type color legend name cdef)],
+                                       type color legend name cdef vdef)],
                     },
                     color     => {
                       mandatory => [qw()],
@@ -59,8 +60,8 @@ our $OPTIONS = {
                       optional  => [qw(draw format cfunc)],
                     },
                     gprint     => {
-                      mandatory => [qw()],
-                      optional  => [qw(draw format cfunc)],
+                      mandatory => [qw(format)],
+                      optional  => [qw(draw cfunc)],
                     },
                     vrule      => {
                       mandatory => [qw(time)],
@@ -69,6 +70,22 @@ our $OPTIONS = {
                     comment    => {
                       mandatory => [],
                       optional  => [],
+                    },
+                    line        => {
+                      mandatory => [qw(value)],
+                      optional  => [qw(width color legend stack)],
+                    },
+                    area        => {
+                      mandatory => [qw(value)],
+                      optional  => [qw(color legend stack)],
+                    },
+                    tick        => {
+                      mandatory => [qw()],
+                      optional  => [qw(draw color legend fraction)],
+                    },
+                    shift       => {
+                      mandatory => [qw(offset)],
+                      optional  => [qw(draw)],
                     },
                   },
     fetch_start=> { mandatory => [qw()],
@@ -456,8 +473,6 @@ sub graph {
 
     my @trailing_options = ();
 
-    my $vname_default;
-
     check_options "graph", \@options;
 
     my @colors = ();
@@ -483,31 +498,42 @@ sub graph {
             }
         } elsif($options[$i] eq "print") {
             check_options "graph/print", [%{$options[$i+1]}];
-                push @prints, [$options[$i], $options[$i+1]];
+            push @prints, [$options[$i], $options[$i+1]];
         } elsif($options[$i] eq "gprint") {
             check_options "graph/gprint", [%{$options[$i+1]}];
-                push @prints, [$options[$i], $options[$i+1]];
+            push @prints, [$options[$i], $options[$i+1]];
         } elsif($options[$i] eq "comment") {
-                if ( ref($options[$i+1]) eq 'ARRAY' ) {
-                    push @prints, [$options[$i], $_] foreach @{$options[$i+1]};
-                }
-                else {
-                    push @prints, [$options[$i], $options[$i+1]];
-                }
+            push @prints, option_expand(@options[$i, $i+1]);
+        } elsif($options[$i] eq "line") {
+            check_options "graph/line", [%{$options[$i+1]}];
+            push @prints, option_expand(@options[$i, $i+1]);
+        } elsif($options[$i] eq "area") {
+            check_options "graph/area", [%{$options[$i+1]}];
+            push @prints, option_expand(@options[$i, $i+1]);
         } elsif($options[$i] eq "vrule") {
             check_options "graph/vrule", [%{$options[$i+1]}];
-                push @vrules, [$options[$i], $options[$i+1]];
+            push @vrules, [$options[$i], $options[$i+1]];
+        } elsif($options[$i] eq "tick") {
+            check_options "graph/tick", [%{$options[$i+1]}];
+            push @prints, option_expand(@options[$i, $i+1]);
+        } elsif($options[$i] eq "shift") {
+            check_options "graph/shift", [%{$options[$i+1]}];
+            push @prints, option_expand(@options[$i, $i+1]);
         } elsif($options[$i] eq "font") {
-                push @fonts,$options[$i+1];
+            push @fonts,$options[$i+1];
         }
     }
 
     delete $options_hash{color};
     delete $options_hash{vrule};
-    delete $options_hash{print};
+    delete $options_hash{'print'};
     delete $options_hash{gprint};
     delete $options_hash{comment};
     delete $options_hash{font};
+    delete $options_hash{line};
+    delete $options_hash{area};
+    delete $options_hash{tick};
+    delete $options_hash{'shift'};
 
     @options = add_dashes(\%options_hash);
 
@@ -536,9 +562,11 @@ sub graph {
 
         $_->{size}     ||= 8;
         $_->{element}  ||= 'default';
-        $_->{name}     ||= '';       # but this breaks. Need to issue an error eventually.
+        $_->{name}     ||= '';       # but this breaks. 
+                                     # Need to issue an error eventually.
 
-        push @options,"--font", uc($_->{element}) . ":" . $_->{size} . ":" . $_->{name};
+        push @options,"--font", uc($_->{element}) . ":" .
+                                $_->{size} . ":" . $_->{name};
     }
 
     for(@draws) {
@@ -563,12 +591,11 @@ sub graph {
             $_->{name} = "draw$draw_count";
         }
 
-            # Set default var name
-        $vname_default ||= $_->{name};
-
             # Is it just a CDEF, a different view of a another draw?
         if($_->{cdef}) {
             push @options, "CDEF:$_->{name}=$_->{cdef}";
+        } elsif($_->{vdef}) {
+            push @options, "VDEF:$_->{name}=$_->{vdef}";
         } else {
                 # Use either directly defined, default for a given file or
                 # default for default file, in this order.
@@ -617,14 +644,34 @@ sub graph {
     for(@prints) {
         if ( $_->[0] eq 'comment' ) {
             push @options, uc($_->[0]) . ":" . $_->[1];
-        }
-        else {
+
+        } elsif( $_->[0] =~ /^(line)|(area)$/ ) {
+            push @options, uc($_->[0]) . 
+                           ($_->[1]->{width} || "") .
+                           ":" .
+                           $_->[1]->{value} .
+                           ($_->[1]->{color} || "") .
+                           ($_->[1]->{legend} ? ":$_->[1]->{legend}" : "") .
+                           ($_->[1]->{stack} ? ":STACK" : "");
+            
+        } elsif( $_->[0] eq "tick" ) {
+            push @options, uc($_->[0]) . ":" .
+                       ($_->[1]->{draw} || $draws[0]->{name}) .
+                       ($_->[1]->{color} || '#ff0000') .
+                       ($_->[1]->{fraction} ? ":$_->[1]->{fraction}" : ":.1") .
+                       ($_->[1]->{legend} ? ":$_->[1]->{legend}" : "");
+            
+        } elsif( $_->[0] eq "shift" ) {
+            push @options, uc($_->[0]) . ":" .
+                           ($_->[1]->{draw} || $draws[0]->{name}) .
+                           ":$_->[1]->{offset}";
+            
+        } else {
             $_->[1]->{draw}   ||= $draws[0]->{name};
-            $_->[1]->{cfunc}  ||= "AVERAGE";
             $_->[1]->{format} ||= "Average=%lf";
             push @options, uc($_->[0]) . ":" .
                            $_->[1]->{draw} . ":" .
-                           $_->[1]->{cfunc} . ":" .
+                           ($_->[1]->{cfunc} ? "$_->[1]->{cfunc}:" : "") .
                            $_->[1]->{format};
         }
     }
@@ -633,6 +680,24 @@ sub graph {
     unshift @options, $image;
 
     $self->RRDs_execute("graph", @options);
+}
+
+#################################################
+sub option_expand {
+#################################################
+    my($oname, $ovalue) = @_;
+
+    # If $ovalue is an array ref, return ($oname, $element)
+    # for each of the elements in @$ovalue.
+    my @result;
+
+    if ( ref($ovalue) eq 'ARRAY' ) {
+        push @result, [$oname, $_] foreach @$ovalue;
+    } else {
+        push @result, [$oname, $ovalue];
+    }
+
+    return @result;
 }
 
 #################################################
@@ -1297,29 +1362,37 @@ on what each option is used for:
 
 Sometimes it's useful to print max, min or average values of
 a given graph at the bottom of the chart or to STDOUT. That's what
-C<gprint> and C<print> options are for. In addition to the C<draw>
-name (defaults to the first draw), a consolidation function can
-be specified: MIN, MAX, AVERAGE, LAST (defaults to AVERAGE). Note
-that this is unrelated to the data source's consolidation function,
-it's just applied on the graph print/gprint refer to. Finally, the
-C<format> parameter gives a printf-like template (defaults to 
-"Average=%lf": A call to
+C<gprint> and C<print> options are for. They are printing variables
+which are defined as C<vdef>s somewhere else:
 
     $rrd->graph(
       image          => $image_file_name,
+          # Real graph
       draw           => {
         name      => "first_draw",
         dsname    => "load",
-        cfunc     => 'MAX'},
+        cfunc     => 'MAX'
+      },
+
+        # vdef for calculating average of real graph
+      draw           => {
+        type      => "hidden",
+        name      => "average_of_first_draw",
+        vdef      => "first_draw,AVERAGE"
+      },
+
       gprint         => {
-        draw      => 'first_draw',
-        cfunc     => 'AVERAGE',
+        draw      => 'average_of_first_draw',
         format    => 'Average=%lf',
       },
     );
 
-prints "Average=x.xx" at the bottom of the graph, showing what the
-average value of the graph is.
+The C<vdef> performs a calculation, specified in RPN notation, on 
+a real graph, which it refers to. It uses a hidden graph for this.
+
+The C<gprint> option then refers to the C<vdef> virtual graph and prints
+"Average=x.xx" at the bottom of the graph, showing what the
+average value of graph C<first_draw> is.
 
 To write comments to the graph (like gprints, but with no associated
 RRD data source) use C<comment>, like this:
@@ -1331,11 +1404,6 @@ RRD data source) use C<comment>, like this:
         dsname    => "load",
         cfunc     => 'MAX'},
       comment        => "Remember, 83% of all statistics are made up",
-      gprint         => {
-        draw      => 'first_draw',
-        cfunc     => 'AVERAGE',
-        format    => 'Average=%lf',
-      },
     );
 
 Multiple comment lines can be specified in a single comment specification
@@ -1360,6 +1428,44 @@ an optional legend string specified:
                  color => "#0000ff",
                  legend => "When we crossed midnight"
                },
+
+Horizontal rules can be added by using a C<line> block
+like in
+
+    line => { 
+        value   => "fixed num value or draw name",
+        color   => "#0000ff",
+        legend  => "a blue horizontal line",
+        width   => 120,
+        stack   => 1,
+    }
+        
+If instead of a horizontal line, a rectangular area is supposed to
+be added to the graph, use an C<area> block:
+
+    area => { 
+        value   => "fixed num value or draw name",
+        color   => "#0000ff",
+        legend  => "a blue horizontal line",
+        stack   => 1,
+    }
+
+The C<graph> method can also generate tickmarks (vertical lines)
+for every defined value, using the C<tick> option:
+
+    tick => {
+        draw    => "drawname",
+        color   => "#0000ff",
+        legend  => "a blue horizontal line",
+        stack   => 1,
+    }
+
+The graph may be shifted relative to the time axis:
+
+    shift => {
+        draw    => "drawname",
+        offset  => $offset,
+    }
 
 =item I<$rrd-E<gt>dump()>
 
@@ -1537,7 +1643,7 @@ Mike Schilli, E<lt>m@perlmeister.comE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2004 by Mike Schilli
+Copyright (C) 2004, 2005 by Mike Schilli
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.8.3 or,
