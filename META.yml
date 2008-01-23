@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                RRDTool-OO
-version:             0.19
+version:             0.20
 abstract:            Object-oriented interface to RRDTool
 license:             ~
 generated_by:        ExtUtils::MakeMaker version 6.31
