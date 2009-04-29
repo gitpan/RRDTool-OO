@@ -1,5 +1,5 @@
 ######################################################################
-    RRDTool::OO 0.24
+    RRDTool::OO 0.25
 ######################################################################
 
 NAME
@@ -465,6 +465,14 @@ DESCRIPTION
               vrule => { time => $first_thing_today,
                          color => "#0000ff",
                          legend => "When we crossed midnight"
+                       },
+
+        hrules can have a color specification (they default to black) and
+        also an optional legend string specified:
+
+              hrule => { value => $numeric_value,
+                         color => "#0000ff",
+                         legend => "a static line at your value"
                        },
 
         Horizontal rules can be added by using a "line" block like in
