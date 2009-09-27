@@ -3,10 +3,8 @@ use ExtUtils::MakeMaker;
 use File::Basename;
 
 # Check if RRDs is installed
-my $v = rrdtool_version();
-#print "v=$v\n";
 
-eval { require RRDs; };
+eval "use RRDs 1.2011";
 
     # (1) libcgi is missing on most Linux/FreeBSD systems, and we
     #     don't need it anyway.
@@ -17,7 +15,7 @@ my $CONFIGURE_OPTS = "--enable-perl-site-install --prefix=/usr --disable-tcl --d
 my $DIST_URL = 
 "http://oss.oetiker.ch/rrdtool/pub/rrdtool.tar.gz";
 
-if($@ or !$v or $v < 1.002011) {
+if($@) {
     print <<EOT;
 This module requires rrdtool 1.2.x and the RRDs module to be 
 installed. They are available in the rrdtool distribution:
@@ -25,8 +23,7 @@ installed. They are available in the rrdtool distribution:
 EOT
 
     $| = 1;
-    print "Do you want me to install it for you right now ([y]/n)?";
-    my $in = <>;
+    my $in = prompt ("Do you want me to install it for you right now (y/n)?","n");
     chomp $in;
     if($in =~ /^\s*$/ or $in =~ /y/i) {
         if($> != 0) {
@@ -87,31 +84,3 @@ sub note {
     print "################################################\n";
 }
 
-##################################################################
-sub rrdtool_version {
-##################################################################
-
-    my @paths = split /:/, $ENV{PATH};
-    push @paths, qw(/usr/bin /usr/local/bin);
-
-    my $path;
-
-    for(@paths) {
-        if(-x "$_/rrdtool") {
-            $path = "$_/rrdtool";
-            last;
-        }
-    }
-
-    return undef unless $path;
-
-    open PIPE, "$path --version |" or die "Cannot run $path";
-    my $data = join '', <PIPE>;
-    close PIPE;
-
-    if($data =~ /RRDtool (\d+)\.(\d+)\.(\d+)/) {
-        return $1 + $2/1000.0 + $3/1000000.0;
-    }
-
-    return undef;
-}
