@@ -7,7 +7,7 @@ use Carp;
 use RRDs;
 use Log::Log4perl qw(:easy);
 
-our $VERSION = '0.30';
+our $VERSION = '0.31';
 
    # Define the mandatory and optional parameters for every method.
 our $OPTIONS = {
@@ -269,9 +269,11 @@ sub create {
     my @hwpredict;
 
     for(my $i=0; $i < @options; $i += 2) {
-        push @archives, $options[$i+1] if $options[$i] eq "archive";
-        push @hwpredict, $options[$i+1] if $options[$i] eq "hwpredict";
-        push @data_sources, $options[$i+1] if $options[$i] eq "data_source";
+          # Push copies (!) of original hashes onto internal data structures
+        push @archives, { %{$options[$i+1]} } if $options[$i] eq "archive";
+        push @hwpredict, { %{$options[$i+1]} } if $options[$i] eq "hwpredict";
+        push @data_sources, 
+            { %{$options[$i+1]} } if $options[$i] eq "data_source";
     }
 
     if(!@archives and !@hwpredict) {
@@ -1287,7 +1289,7 @@ If you want
 to combine several primary data points into one archive point, specify
 values for 
 C<cpoints> (the number of points to combine) and C<cfunc> 
-(the consolidation function) explicitely:
+(the consolidation function) explicitly:
 
     $rrd->create(
          step        => 60,
@@ -1444,7 +1446,7 @@ an image file on disk is as easy as
     );
 
 This will assume a start time of 24 hours before now and an
-end time of now. Specify C<start> and C<end> explicitely to
+end time of now. Specify C<start> and C<end> explicitly to
 be clear:
 
     $rrd->graph(
@@ -1462,7 +1464,7 @@ As always, C<RRDTool::OO> will pick reasonable defaults for parameters
 not specified. The values for data source and consolidation function
 default to the first values it finds in the RRD.
 If there are multiple datasources in the RRD or multiple archives
-with different values for C<cfunc>, just specify explicitely which
+with different values for C<cfunc>, just specify explicitly which
 one to draw:
 
     $rrd->graph(
@@ -1820,6 +1822,8 @@ Alter a RRD's data source configuration values:
 Return the message of the last error that occurred while interacting
 with C<RRDTool::OO>.
 
+=back
+
 =head2 Aberrant behavior detection
 
 RRDTool supports aberrant behavior detection (ABD), which takes a data
@@ -1903,8 +1907,6 @@ The C<rra-num> argument is an internal index referencing other
 RRAs (for example, HWPREDICT references SEASONAL), but this will 
 be taken care of automatically by RRDTool::OO with no user
 interaction required whatsoever.
-
-=back
 
 =head2 Development Status
 
@@ -2017,7 +2019,7 @@ what's going on under the hood, just turn it on:
         level    => $DEBUG
     }); 
 
-If you're interested particularily in I<rrdtool> commands issued
+If you're interested particularly in I<rrdtool> commands issued
 by C<RRDTool::OO> while you're operating it, just enable the
 category C<"rrdtool">:
 
