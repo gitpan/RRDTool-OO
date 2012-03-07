@@ -5,9 +5,10 @@ use strict;
 use warnings;
 use Carp;
 use RRDs;
+use Data::Dumper;
 use Log::Log4perl qw(:easy);
 
-our $VERSION = '0.31';
+our $VERSION = '0.32';
 
    # Define the mandatory and optional parameters for every method.
 our $OPTIONS = {
@@ -104,7 +105,23 @@ our $OPTIONS = {
                       mandatory => [qw(offset)],
                       optional  => [qw(draw)],
                     },
-                  },
+                 },
+     xport => {
+        mandatory => [qw(xport)],
+        optional  => [qw(def cdef start end step maxrows daemon)],
+        def => {
+            mandatory => [qw(file vname dsname cfunc)],
+            optional => [],
+        },
+        cdef => {
+            mandatory => [qw(vname rpn)],
+            optional => [],
+        },
+        xport => {
+            mandatory => [qw(vname)],
+            optional => [qw(legend)],
+        },
+    },
     fetch_start=> { mandatory => [qw()],
                     optional  => [qw(cfunc start end resolution)],
                   },
@@ -128,9 +145,6 @@ our $OPTIONS = {
                     optional  => [],
                   },
     rrdresize  => { mandatory => [],
-                    optional  => [],
-                  },
-    xport      => { mandatory => [],
                     optional  => [],
                   },
     rrdcgi     => { mandatory => [],
@@ -1071,7 +1085,13 @@ sub process_draw {
         $p->{type} ||= 'line';
 
         my $draw_attributes = ":$p->{name}#$p->{color}";
-        $draw_attributes .= ":$p->{legend}" if length $p->{legend};
+
+        if( length $p->{legend} ) {
+            $draw_attributes .= ":$p->{legend}";
+        } elsif( exists $p->{stack} ) {
+            $draw_attributes .= ":";
+        }
+
         $draw_attributes .= ":STACK" if exists $p->{stack};
 
         if($p->{type} eq "hidden") {
@@ -1081,6 +1101,9 @@ sub process_draw {
         } elsif($p->{type} eq "area") {
             push @$options, "AREA$draw_attributes";
         } elsif($p->{type} eq "stack") {
+            if( ! length $p->{legend} ) {
+                $draw_attributes .= ":";
+            }
               # modified for backwards compatibility
             push @$options, "AREA$draw_attributes:STACK";
         } else {
@@ -1154,6 +1177,127 @@ sub process_print {
                        $p->[1]->{format};
     }
 }
+
+#################################################
+sub xport {
+#################################################
+	my ($this, @options) = @_;
+
+	my $sname = "xport";
+	my $section = $OPTIONS->{$sname};
+
+	DEBUG(sub { Dumper($OPTIONS) });
+	DEBUG(sub { Dumper($section) });
+
+	$this->check_options($sname, \@options);
+	$this->print_results([]);
+
+	my %options = @options;
+	my $ref;
+	my @cmd;
+	# If it's a DateTime object, handle it gracefully
+	foreach (qw(start end)) {
+		next unless exists($options{$_});
+		next unless defined($options{$_});
+		if (ref($options{$_}) eq "DateTime") {
+			$options{$_} = $options{$_}->epoch();
+		}
+	}
+
+	my @all_options = (@{$section->{optional}}, @{$section->{mandatory}});
+	foreach my $opt (@all_options) {
+		DEBUG("Processing optional option '$opt'");
+		if (defined($options{$opt}) and not ref($options{$opt})) {
+			push(@cmd, "--$opt", $options{$opt});
+			DEBUG("[xport] Pushed option '--$opt' with value '$options{$opt}'");
+		}
+	}
+	undef(@all_options);
+
+	my %params = (
+		def => [],
+		cdef => [],
+		xport => [],
+	);
+
+	my $string;
+	foreach my $sec (keys(%params)) {
+		next unless (defined($options{$sec}));
+		LOGDIE("$sec section must be an array ref") unless (ref($options{$sec}) eq "ARRAY");
+		foreach my $opts (@{$options{$sec}}) {
+			LOGDIE("$sec/$opts section must be a hash ref") unless (ref($opts) eq "HASH");
+			my @opts = %$opts;
+			$this->check_options("$sname/$sec", \@opts);
+
+			my $array = $params{$sec};
+
+			# DEF
+			if ($sec =~ /^def$/i) {
+				$string = "DEF:";
+				$string .= "$opts->{vname}=";
+				$string .= "$opts->{file}:";
+				$string .= "$opts->{dsname}:";
+				$string .= $opts->{cfunc};
+				push(@$array, $string);
+				DEBUG("[xport] Pushed DEF '$string'");
+			}
+			# CDEF
+			elsif ($sec =~ /^cdef$/i) {
+				$string = "CDEF:";
+				$string .= "$opts->{vname}=";
+				$string .= $opts->{rpn};
+				push(@$array, $string);
+				DEBUG("[xport] Pushed CDEF '$string'");
+			}
+			# XPORT
+			else {
+				$string = "XPORT:";
+				$string .= $opts->{vname};
+				$string .= ":$opts->{legend}" if defined($opts->{legend});
+				push(@$array, $string);
+				DEBUG("[xport] Pushed XPORT '$string'");
+			}
+		}
+
+	}
+
+	# Order matters !
+	foreach my $sec (qw(def cdef xport)) {
+		push(@cmd, @{$params{$sec}}) if (defined($params{$sec}) and scalar @{$params{$sec}} != 0);
+	}
+
+	DEBUG("[xport] RRDs command: ".join(" ", @cmd));
+
+	my @results = $this->RRDs_execute($sname, @cmd);
+	LOGDIE("RRDs::xport() failed") unless (scalar @results > 0);
+
+	my %meta_data = (
+		start => $results[0], # Exactly start+step
+		end => $results[1],
+		step => $results[2],
+		columns => $results[3],
+		legend => $results[4],
+	);
+
+	my $time = $meta_data{start};
+
+	my @data;
+	foreach my $data (@{$results[5]}) {
+		push(@data, [$time, @$data]);
+		$time += $meta_data{step};
+	}
+
+	$meta_data{rows} = scalar @data;
+
+    my $results = {
+		meta => \%meta_data,
+		data => \@data,
+	};
+
+    return $this->print_results($results);
+}
+
+
 
 ##########################################
 sub def_or($$) {
@@ -1584,6 +1728,7 @@ C<overlay>,
 C<unit>, 
 C<lazy>, 
 C<rigid>,
+C<lower_limit>, 
 C<upper_limit>, 
 C<logarithmic>, 
 C<color>, 
@@ -1722,7 +1867,7 @@ like in
         width   => 120,
         stack   => 1,
     }
-        
+
 If instead of a horizontal line, a rectangular area is supposed to
 be added to the graph, use an C<area> block:
 
@@ -1777,6 +1922,63 @@ instead, do this:
     open OUT, ">out";
     print OUT $_ for <DUMP>;
     close OUT;
+
+=item I<my $hashref = $rrd-E<gt>xport(...)>
+
+Feed a perl structure with RRA data (Cf. rrdxport man page).
+
+    my $results = $rrd->xport(
+        start => $start_time,
+        end => $end_time ,
+        step => $step,
+        def => [{
+            vname => "load1_vname",
+            file => "foo",
+            dsname => "load1",
+            cfunc => "MAX",
+        },
+        {
+            vname => "load2_vname",
+            file => "foo",
+            dsname => "load2",
+            cfunc => "MIN",
+        }],
+
+        cdef => [{
+            vname => "load2_vname_multiply",
+            rpn => "load2_vname,2,*",
+        }],
+
+        xport => [{
+            vname => "load1_vname",
+            legend => "it_s_gonna_be_legend_",
+        },
+        {
+            vname => "load2_vname",
+            legend => "wait_for_it",
+        },
+        {
+            vname => "load2_vname_multiply",
+            legend => "___dary",
+        }],
+    );
+
+    my $data = $results->{data};
+    my $metadata = $results->{meta};
+
+    print "### METADATA ###\n";
+    print "StartTime: $metadata->{start}\n";
+    print "EndTime: $metadata->{end}\n";
+    print "Step: $metadata->{step}\n";
+    print "Number of data columns: $metadata->{columns}\n";
+    print "Number of data rows: $metadata->{rows}\n";
+    print "Legend: ", join(", ", @{$metadata->{legend}}), "\n";
+
+    print "\n### DATA ###\n";
+    foreach my $entry (@$data) {
+        my $entry_timestamp = shift(@$entry);
+        print "[$entry_timestamp] ", join(" ", @$entry), "\n";
+    }
 
 =item I<my $hashref = $rrd-E<gt>info()>
 
@@ -1871,7 +2073,7 @@ consolidate the data from a data source before stuffing it into
 the HWPREDICT RRAs, as the whole point of ABD is to smooth unfiltered
 data and predict future values.
 
-A violation happen if a new measured value falls outside of the
+A violation happens if a new measured value falls outside of the
 prediction. If C<threshold> or more violations happen within
 C<window_length>, an error is reported to the FAILURES RRA.
 C<threshold> defaults to 7, C<window_length> to 9.

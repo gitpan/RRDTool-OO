@@ -1,5 +1,5 @@
 ######################################################################
-    RRDTool::OO 0.31
+    RRDTool::OO 0.32
 ######################################################################
 
 NAME
@@ -377,8 +377,9 @@ DESCRIPTION
         "alt_y_grid", "no_minor", "alt_y_mrtg", "alt_autoscale",
         "alt_autoscale_max", "base", "units_exponent", "units_length",
         "width", "height", "interlaced", "imginfo", "imgformat", "overlay",
-        "unit", "lazy", "rigid", "upper_limit", "logarithmic", "color",
-        "no_legend", "only_graph", "force_rules_legend", "title", "step".
+        "unit", "lazy", "rigid", "lower_limit", "upper_limit",
+        "logarithmic", "color", "no_legend", "only_graph",
+        "force_rules_legend", "title", "step".
 
         Some options (e.g. "alt_y_grid") don't expect values, they need to
         be specified like
@@ -504,7 +505,7 @@ DESCRIPTION
                 width   => 120,
                 stack   => 1,
             }
-        
+
         If instead of a horizontal line, a rectangular area is supposed to
         be added to the graph, use an "area" block:
 
@@ -557,6 +558,62 @@ DESCRIPTION
             open OUT, ">out";
             print OUT $_ for <DUMP>;
             close OUT;
+
+    *my $hashref = $rrd->xport(...)*
+        Feed a perl structure with RRA data (Cf. rrdxport man page).
+
+            my $results = $rrd->xport(
+                start => $start_time,
+                end => $end_time ,
+                step => $step,
+                def => [{
+                    vname => "load1_vname",
+                    file => "foo",
+                    dsname => "load1",
+                    cfunc => "MAX",
+                },
+                {
+                    vname => "load2_vname",
+                    file => "foo",
+                    dsname => "load2",
+                    cfunc => "MIN",
+                }],
+
+                cdef => [{
+                    vname => "load2_vname_multiply",
+                    rpn => "load2_vname,2,*",
+                }],
+
+                xport => [{
+                    vname => "load1_vname",
+                    legend => "it_s_gonna_be_legend_",
+                },
+                {
+                    vname => "load2_vname",
+                    legend => "wait_for_it",
+                },
+                {
+                    vname => "load2_vname_multiply",
+                    legend => "___dary",
+                }],
+            );
+
+            my $data = $results->{data};
+            my $metadata = $results->{meta};
+
+            print "### METADATA ###\n";
+            print "StartTime: $metadata->{start}\n";
+            print "EndTime: $metadata->{end}\n";
+            print "Step: $metadata->{step}\n";
+            print "Number of data columns: $metadata->{columns}\n";
+            print "Number of data rows: $metadata->{rows}\n";
+            print "Legend: ", join(", ", @{$metadata->{legend}}), "\n";
+
+            print "\n### DATA ###\n";
+            foreach my $entry (@$data) {
+                my $entry_timestamp = shift(@$entry);
+                print "[$entry_timestamp] ", join(" ", @$entry), "\n";
+            }
 
     *my $hashref = $rrd->info()*
         Grabs the RRD's meta data and returns it as a hashref, holding a map
@@ -644,7 +701,7 @@ DESCRIPTION
     HWPREDICT RRAs, as the whole point of ABD is to smooth unfiltered data
     and predict future values.
 
-    A violation happen if a new measured value falls outside of the
+    A violation happens if a new measured value falls outside of the
     prediction. If "threshold" or more violations happen within
     "window_length", an error is reported to the FAILURES RRA. "threshold"
     defaults to 7, "window_length" to 9.
@@ -787,7 +844,7 @@ DESCRIPTION
 
         Log::Log4perl->easy_init({
             level    => $DEBUG
-        }); 
+        });
 
     If you're interested particularly in *rrdtool* commands issued by
     "RRDTool::OO" while you're operating it, just enable the category
@@ -797,7 +854,7 @@ DESCRIPTION
             level    => $INFO, 
             category => 'rrdtool',
             layout   => '%m%n',
-        }); 
+        });
 
     This will display all "rrdtool" commands that "RRDTool::OO" submits to
     the shared library. Let's turn it on for the code snippet in the
@@ -839,7 +896,7 @@ DESCRIPTION
         my $rrd = RRDTool::OO->new(
             strict => 0,
             file   => "myrrdfile.rrd",
-        ); 
+        );
 
     Note that "RRDTool::OO" follows the convention that parameters names do
     not contain dashes, but underscores instead. So, you need to say
