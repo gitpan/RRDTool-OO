@@ -20,6 +20,7 @@ no_index:
 requires:
   Log::Log4perl: 0.40
   RRDs: 0
+  Storable: 0
 resources:
   repository: http://github.com/mschilli/rrdtool-oo-perl
-version: 0.32
+version: 0.33
