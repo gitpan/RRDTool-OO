@@ -9,7 +9,7 @@ use Storable;
 use Data::Dumper;
 use Log::Log4perl qw(:easy);
 
-our $VERSION = '0.33';
+our $VERSION = '0.34';
 
    # Define the mandatory and optional parameters for every method.
 our $OPTIONS = {
@@ -53,6 +53,7 @@ our $OPTIONS = {
                                      no_gridfit font_render_mode
                                      font_smoothing_threshold slope_mode
                                      tabwidth units watermark zoom
+                                     disable_rrdtool_tag
                                     )],
                     draw      => {
                       mandatory => [qw()],
