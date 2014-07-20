@@ -23,4 +23,4 @@ requires:
   Storable: '0'
 resources:
   repository: http://github.com/mschilli/rrdtool-oo-perl
-version: '0.34'
+version: '0.35'

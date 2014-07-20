@@ -20,5 +20,6 @@ t/010ABD.t
 t/011Bugs.t
 t/012Xport.t
 t/013Clone.t
+t/inc/round.t
 META.yml                                 Module YAML meta-data (added by MakeMaker)
 META.json                                Module JSON meta-data (added by MakeMaker)
